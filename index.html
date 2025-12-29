@@ -1,0 +1,171 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>JS Plinko</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/matter-js/0.19.0/matter.min.js"></script>
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            min-height: 100vh;
+            background-color: #1a1a2e;
+            color: white;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+        }
+        canvas {
+            border: 4px solid #16213e;
+            border-radius: 10px;
+            box-shadow: 0 0 20px rgba(0,0,0,0.5);
+            background: #0f3460;
+        }
+        .controls {
+            margin-top: 20px;
+            text-align: center;
+        }
+        button {
+            padding: 12px 30px;
+            font-size: 18px;
+            font-weight: bold;
+            cursor: pointer;
+            background-color: #e94560;
+            color: white;
+            border: none;
+            border-radius: 5px;
+            transition: transform 0.1s, background-color 0.2s;
+        }
+        button:hover { background-color: #ff4d6d; }
+        button:active { transform: scale(0.95); }
+        .score-board {
+            margin-bottom: 10px;
+            font-size: 24px;
+        }
+    </style>
+</head>
+<body>
+
+    <div class="score-board">Total Score: <span id="score">0</span></div>
+    <div id="game-container"></div>
+    <div class="controls">
+        <button onclick="dropBall()">DROP BALL</button>
+    </div>
+
+    <script>
+        const { Engine, Render, Runner, Bodies, Composite, Events } = Matter;
+
+        // Configuration
+        const width = 500;
+        const height = 600;
+        const rows = 9;
+        const pegRadius = 6;
+        const ballRadius = 10;
+        let totalScore = 0;
+
+        // Setup Engine
+        const engine = Engine.create();
+        const world = engine.world;
+
+        // Setup Renderer
+        const render = Render.create({
+            element: document.getElementById('game-container'),
+            engine: engine,
+            options: {
+                width: width,
+                height: height,
+                wireframes: false,
+                background: 'transparent'
+            }
+        });
+
+        // Create Pegs (The Triangle)
+        for (let i = 0; i < rows; i++) {
+            const rowPegs = i + 3;
+            const spacing = width / (rowPegs + 1);
+            for (let j = 0; j < rowPegs; j++) {
+                const x = (j + 1) * spacing;
+                const y = 80 + (i * 50);
+                const peg = Bodies.circle(x, y, pegRadius, {
+                    isStatic: true,
+                    render: { fillStyle: '#ffffff' }
+                });
+                Composite.add(world, peg);
+            }
+        }
+
+        // Create Multiplier Buckets
+        const multipliers = [5, 2, 1, 0.5, 0.2, 0.5, 1, 2, 5];
+        const bucketCount = multipliers.length;
+        const bucketWidth = width / bucketCount;
+
+        for (let i = 0; i < bucketCount; i++) {
+            // Walls between buckets
+            const wall = Bodies.rectangle(i * bucketWidth, height - 30, 4, 60, {
+                isStatic: true,
+                render: { fillStyle: '#16213e' }
+            });
+            Composite.add(world, wall);
+
+            // Scoring labels (Visual only)
+            // Handled via standard canvas drawing in Matter.js 'afterRender'
+        }
+
+        // Walls to keep ball inside
+        Composite.add(world, [
+            Bodies.rectangle(0, height/2, 10, height, { isStatic: true, render: { visible: false } }),
+            Bodies.rectangle(width, height/2, 10, height, { isStatic: true, render: { visible: false } })
+        ]);
+
+        function dropBall() {
+            // Randomize start position slightly at the top center
+            const x = (width / 2) + (Math.random() * 20 - 10);
+            const ball = Bodies.circle(x, 20, ballRadius, {
+                restitution: 0.6,
+                friction: 0.05,
+                render: { fillStyle: '#e94560' },
+                label: 'ball'
+            });
+            Composite.add(world, ball);
+        }
+
+        // Scoring Logic
+        Events.on(engine, 'afterUpdate', () => {
+            const bodies = Composite.allBodies(world);
+            bodies.forEach(body => {
+                if (body.label === 'ball' && body.position.y > height - 20) {
+                    // Calculate which bucket it landed in
+                    const bucketIndex = Math.floor(body.position.x / bucketWidth);
+                    const points = multipliers[Math.max(0, Math.min(bucketIndex, bucketCount - 1))];
+                    
+                    updateScore(points);
+                    Composite.remove(world, body);
+                }
+            });
+        });
+
+        function updateScore(points) {
+            totalScore += points;
+            document.getElementById('score').innerText = totalScore.toFixed(1);
+        }
+
+        // Custom rendering for bucket text
+        Events.on(render, 'afterRender', () => {
+            const ctx = render.context;
+            ctx.font = 'bold 16px Arial';
+            ctx.fillStyle = '#ffffff';
+            ctx.textAlign = 'center';
+            multipliers.forEach((m, i) => {
+                ctx.fillText(`${m}x`, (i * bucketWidth) + (bucketWidth / 2), height - 10);
+            });
+        });
+
+        Render.run(render);
+        const runner = Runner.create();
+        Runner.run(runner, engine);
+    </script>
+</body>
+</html>
