@@ -2,170 +2,177 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>JS Plinko</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Mobile Plinko + Celebration</title>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/matter-js/0.19.0/matter.min.js"></script>
     <style>
+        * { touch-action: manipulation; box-sizing: border-box; }
         body {
-            margin: 0;
-            padding: 0;
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-            justify-content: center;
-            min-height: 100vh;
-            background-color: #1a1a2e;
-            color: white;
-            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            margin: 0; padding: 10px;
+            display: flex; flex-direction: column;
+            align-items: center; justify-content: center;
+            min-height: 100vh; background-color: #1a1a2e;
+            color: white; font-family: sans-serif; overflow: hidden;
+        }
+        #game-container {
+            width: 100%; max-width: 450px;
+            aspect-ratio: 5 / 6; position: relative;
         }
         canvas {
-            border: 4px solid #16213e;
-            border-radius: 10px;
-            box-shadow: 0 0 20px rgba(0,0,0,0.5);
+            width: 100% !important; height: auto !important;
+            border: 3px solid #16213e; border-radius: 12px;
             background: #0f3460;
         }
-        .controls {
-            margin-top: 20px;
-            text-align: center;
-        }
+        .controls { margin-top: 15px; width: 100%; max-width: 450px; }
         button {
-            padding: 12px 30px;
-            font-size: 18px;
-            font-weight: bold;
-            cursor: pointer;
-            background-color: #e94560;
-            color: white;
-            border: none;
-            border-radius: 5px;
-            transition: transform 0.1s, background-color 0.2s;
+            width: 100%; padding: 20px; font-size: 22px; font-weight: bold;
+            cursor: pointer; background-color: #e94560; color: white;
+            border: none; border-radius: 12px; box-shadow: 0 5px #952d3e;
         }
-        button:hover { background-color: #ff4d6d; }
-        button:active { transform: scale(0.95); }
-        .score-board {
-            margin-bottom: 10px;
-            font-size: 24px;
-        }
+        button:active { transform: translateY(2px); box-shadow: 0 2px #952d3e; }
+        .score-board { font-size: 24px; margin-bottom: 10px; color: #4ecca3; font-weight: bold; }
     </style>
 </head>
 <body>
 
-    <div class="score-board">Total Score: <span id="score">0</span></div>
+    <div class="score-board">Score: <span id="score">0</span></div>
     <div id="game-container"></div>
     <div class="controls">
-        <button onclick="dropBall()">DROP BALL</button>
+        <button id="dropBtn">DROP BALL</button>
     </div>
 
     <script>
+        // Audio Setup
+        const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+        function playPlink(pitch = 1, type = 'sine', volume = 0.1) {
+            const osc = audioCtx.createOscillator();
+            const gain = audioCtx.createGain();
+            osc.type = type;
+            osc.frequency.setValueAtTime(600 * pitch, audioCtx.currentTime);
+            osc.frequency.exponentialRampToValueAtTime(100, audioCtx.currentTime + 0.15);
+            gain.gain.setValueAtTime(volume, audioCtx.currentTime);
+            gain.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.15);
+            osc.connect(gain); gain.connect(audioCtx.destination);
+            osc.start(); osc.stop(audioCtx.currentTime + 0.15);
+        }
+
         const { Engine, Render, Runner, Bodies, Composite, Events } = Matter;
-
-        // Configuration
-        const width = 500;
-        const height = 600;
-        const rows = 9;
-        const pegRadius = 6;
-        const ballRadius = 10;
+        const width = 500, height = 600, rows = 8;
         let totalScore = 0;
+        let particles = [];
 
-        // Setup Engine
         const engine = Engine.create();
         const world = engine.world;
-
-        // Setup Renderer
         const render = Render.create({
             element: document.getElementById('game-container'),
             engine: engine,
-            options: {
-                width: width,
-                height: height,
-                wireframes: false,
-                background: 'transparent'
-            }
+            options: { width, height, wireframes: false, background: 'transparent' }
         });
 
-        // Create Pegs (The Triangle)
+        // Add Pegs
         for (let i = 0; i < rows; i++) {
             const rowPegs = i + 3;
             const spacing = width / (rowPegs + 1);
             for (let j = 0; j < rowPegs; j++) {
-                const x = (j + 1) * spacing;
-                const y = 80 + (i * 50);
-                const peg = Bodies.circle(x, y, pegRadius, {
-                    isStatic: true,
-                    render: { fillStyle: '#ffffff' }
+                const peg = Bodies.circle((j + 1) * spacing, 100 + (i * 55), 6, {
+                    isStatic: true, render: { fillStyle: '#ffffff' }, label: 'peg'
                 });
                 Composite.add(world, peg);
             }
         }
 
-        // Create Multiplier Buckets
-        const multipliers = [5, 2, 1, 0.5, 0.2, 0.5, 1, 2, 5];
-        const bucketCount = multipliers.length;
-        const bucketWidth = width / bucketCount;
-
-        for (let i = 0; i < bucketCount; i++) {
-            // Walls between buckets
-            const wall = Bodies.rectangle(i * bucketWidth, height - 30, 4, 60, {
-                isStatic: true,
-                render: { fillStyle: '#16213e' }
-            });
-            Composite.add(world, wall);
-
-            // Scoring labels (Visual only)
-            // Handled via standard canvas drawing in Matter.js 'afterRender'
+        // Add Buckets
+        const multipliers = [5, 2, 1, 0.5, 1, 2, 5];
+        const bucketWidth = width / multipliers.length;
+        for (let i = 0; i <= multipliers.length; i++) {
+            Composite.add(world, Bodies.rectangle(i * bucketWidth, height - 35, 4, 70, {
+                isStatic: true, render: { fillStyle: '#16213e' }
+            }));
         }
 
-        // Walls to keep ball inside
-        Composite.add(world, [
-            Bodies.rectangle(0, height/2, 10, height, { isStatic: true, render: { visible: false } }),
-            Bodies.rectangle(width, height/2, 10, height, { isStatic: true, render: { visible: false } })
-        ]);
+        // Particles for celebration
+        function createConfetti(x, y) {
+            for (let i = 0; i < 20; i++) {
+                particles.push({
+                    x, y,
+                    vx: (Math.random() - 0.5) * 10,
+                    vy: (Math.random() - 0.5) * 10 - 5,
+                    life: 1.0,
+                    color: `hsl(${Math.random() * 360}, 100%, 50%)`
+                });
+            }
+        }
+
+        Events.on(engine, 'collisionStart', (event) => {
+            event.pairs.forEach((pair) => {
+                if (pair.bodyA.label === 'peg' || pair.bodyB.label === 'peg') {
+                    playPlink(0.8 + Math.random() * 0.4);
+                }
+            });
+        });
 
         function dropBall() {
-            // Randomize start position slightly at the top center
-            const x = (width / 2) + (Math.random() * 20 - 10);
-            const ball = Bodies.circle(x, 20, ballRadius, {
-                restitution: 0.6,
-                friction: 0.05,
-                render: { fillStyle: '#e94560' },
-                label: 'ball'
+            if (audioCtx.state === 'suspended') audioCtx.resume();
+            const ball = Bodies.circle(width/2 + (Math.random()*20-10), 20, 10, {
+                restitution: 0.6, friction: 0.01,
+                render: { fillStyle: '#e94560' }, label: 'ball'
             });
             Composite.add(world, ball);
         }
 
-        // Scoring Logic
+        document.getElementById('dropBtn').addEventListener('pointerdown', (e) => {
+            e.preventDefault();
+            dropBall();
+        });
+
         Events.on(engine, 'afterUpdate', () => {
-            const bodies = Composite.allBodies(world);
-            bodies.forEach(body => {
+            // Particle physics
+            particles.forEach((p, i) => {
+                p.x += p.vx; p.y += p.vy;
+                p.vy += 0.2; // Gravity
+                p.life -= 0.02;
+                if (p.life <= 0) particles.splice(i, 1);
+            });
+
+            // Ball scoring
+            Composite.allBodies(world).forEach(body => {
                 if (body.label === 'ball' && body.position.y > height - 20) {
-                    // Calculate which bucket it landed in
-                    const bucketIndex = Math.floor(body.position.x / bucketWidth);
-                    const points = multipliers[Math.max(0, Math.min(bucketIndex, bucketCount - 1))];
+                    const idx = Math.floor(body.position.x / bucketWidth);
+                    const val = multipliers[Math.max(0, Math.min(idx, multipliers.length - 1))];
                     
-                    updateScore(points);
+                    if (val >= 2) {
+                        playPlink(2, 'square', 0.15); // Higher, richer "win" sound
+                        createConfetti(body.position.x, height - 40);
+                    }
+
+                    totalScore += val;
+                    document.getElementById('score').innerText = totalScore.toFixed(1);
                     Composite.remove(world, body);
                 }
             });
         });
 
-        function updateScore(points) {
-            totalScore += points;
-            document.getElementById('score').innerText = totalScore.toFixed(1);
-        }
-
-        // Custom rendering for bucket text
         Events.on(render, 'afterRender', () => {
             const ctx = render.context;
-            ctx.font = 'bold 16px Arial';
+            // Draw particles
+            particles.forEach(p => {
+                ctx.globalAlpha = p.life;
+                ctx.fillStyle = p.color;
+                ctx.fillRect(p.x, p.y, 6, 6);
+            });
+            ctx.globalAlpha = 1.0;
+
+            // Draw labels
+            ctx.font = 'bold 18px sans-serif';
             ctx.fillStyle = '#ffffff';
             ctx.textAlign = 'center';
             multipliers.forEach((m, i) => {
-                ctx.fillText(`${m}x`, (i * bucketWidth) + (bucketWidth / 2), height - 10);
+                ctx.fillText(`${m}x`, (i * bucketWidth) + (bucketWidth / 2), height - 15);
             });
         });
 
         Render.run(render);
-        const runner = Runner.create();
-        Runner.run(runner, engine);
+        Runner.run(Runner.create(), engine);
     </script>
 </body>
 </html>
